@@ -1,0 +1,119 @@
+package usecase
+
+import (
+	"TechnoParkDBProject/internal/forum"
+	"TechnoParkDBProject/internal/pkg/utils"
+	"TechnoParkDBProject/internal/posts"
+	"TechnoParkDBProject/internal/posts/models"
+	"TechnoParkDBProject/internal/thread"
+	threadModels "TechnoParkDBProject/internal/thread/models"
+	"TechnoParkDBProject/internal/user"
+	"errors"
+	"strconv"
+)
+
+type PostsUsecase struct {
+	postsRep  posts.Repository
+	threadRep thread.Repository
+	forumRep  forum.Repository
+	userRep   user.Repository
+}
+
+func NewPostsUsecase(postsRep posts.Repository, threadRep thread.Repository,
+	forumRep forum.Repository, userRep user.Repository) *PostsUsecase {
+	return &PostsUsecase{
+		postsRep:  postsRep,
+		threadRep: threadRep,
+		forumRep:  forumRep,
+		userRep:   userRep,
+	}
+}
+
+func (postUsecase *PostsUsecase) CreatePost(posts []*models.Post, slugOrInt string) ([]*models.Post, error) {
+	var thread *threadModels.Thread
+	threadID, err := strconv.Atoi(slugOrInt)
+	if err != nil {
+		thread, err = postUsecase.threadRep.FindThreadBySlug(slugOrInt)
+		if err != nil {
+			return nil, errors.New("no thread")
+		}
+	} else {
+		thread, err = postUsecase.threadRep.FindThreadByID(threadID)
+		if err != nil {
+			return nil, errors.New("no thread")
+		}
+	}
+
+	if len(posts) == 0 {
+		return nil, errors.New("no posts")
+	}
+	_, err = postUsecase.userRep.GetUserByNickname(posts[0].Author)
+	if err != nil {
+		return nil, errors.New("no user")
+	}
+
+	posts, err = postUsecase.postsRep.CreatePost(posts, thread.Forum, thread.ID)
+
+	return posts, err
+}
+
+func (postUsecase *PostsUsecase) GetPosts(sort, since, slugOrID string, limit int, desc bool) ([]*models.Post, error) {
+	threadID, err := strconv.Atoi(slugOrID)
+	thread := &threadModels.Thread{}
+	if err != nil {
+		thread, err = postUsecase.threadRep.FindThreadBySlug(slugOrID)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		thread, err = postUsecase.threadRep.FindThreadByID(threadID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	posts, err := postUsecase.postsRep.GetPosts(limit, thread.ID, sort, since, desc)
+	return posts, err
+}
+
+func (posUse *PostsUsecase) GetPost(posID int, relatedStrs []string) (*models.PostResponse, error) {
+	post, err := posUse.postsRep.GetPost(posID)
+	if err != nil {
+		return nil, err
+	}
+	postResponse := &models.PostResponse{Post: post}
+	if utils.Find(relatedStrs, "user") {
+		user, err := posUse.userRep.GetUserByNickname(post.Author)
+		if err != nil {
+			return nil, err
+		}
+		postResponse.User = user
+	}
+	if utils.Find(relatedStrs, "forum") {
+		forum, err := posUse.forumRep.GetForumBySlug(post.Forum)
+		if err != nil {
+			return nil, err
+		}
+		postResponse.Forum = forum
+	}
+	if utils.Find(relatedStrs, "thread") {
+		thread, err := posUse.threadRep.FindThreadByID(post.Thread)
+		if err != nil {
+			return nil, err
+		}
+		postResponse.Thread = thread
+	}
+	return postResponse, err
+}
+
+func (postUse *PostsUsecase) UpdatePost(post *models.Post) (*models.Post, error) {
+	oldPost, err := postUse.postsRep.GetPost(post.ID)
+	if err != nil {
+		return nil, err
+	}
+	if oldPost.Message == post.Message {
+		return oldPost, nil
+	}
+	post, err = postUse.postsRep.UpdatePostByID(post)
+	return post, err
+}
